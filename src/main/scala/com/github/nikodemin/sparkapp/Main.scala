@@ -1,5 +1,6 @@
 package com.github.nikodemin.sparkapp
 
+import com.github.nikodemin.sparkapp.aggregator.SessionAggregator
 import org.apache.spark.sql.SparkSession
 import org.apache.spark.sql.functions._
 import org.apache.spark.sql.types._
@@ -43,6 +44,7 @@ object Main {
       .groupBy("platform")
       .agg(count("userId").as("views"), countDistinct("userId").as("unique_users"))
       .select("platform", "views", "unique_users")
+      .cache
 
     println("Count of views and users grouped by platforms")
     viewsAndUsersByPlatformDf.show
@@ -63,9 +65,31 @@ object Main {
         countDistinct("resources.USER_PHOTO").as("unique_user_photos")
       ).select("date", "unique_users", "unique_groups", "unique_group_photos",
       "unique_movies", "unique_posts", "unique_user_photos")
-      .show()
+      .show
 
-    println("")
-    initialDf
+    println("Grouping views by sessions and calculationg duration of each session")
+    val sessionMaxThreshold = 20
+    spark.udf.register("sessionAggregate", udaf(SessionAggregator(sessionMaxThreshold)))
+
+    val sessionDf = initialDf.groupBy("userId")
+      .agg(("timestamp", "sessionAggregate"))
+      .select(col("userId"), explode(col("sessionaggregate(timestamp)")).as("session"))
+      //      .select(
+      //        col("userId"),
+      //        col("session").getItem(0).cast(StringType).as("session_duration_string"),
+      //        col("session").getItem(1).cast(LongType).as("session_duration")
+      //       encoder list)
+      .orderBy("userId")
+
+    sessionDf.printSchema
+    sessionDf.show(20, truncate = false)
+
+    initialDf.select(
+      from_unixtime(expr("timestamp/1000"), "yyyy-MM-dd hh:mm:ss").as("date"),
+      expr("durationMs/1000").as("duration_s")
+    )
+      .where(col("userId").equalTo(3869))
+      .sort("date")
+      .show(10000)
   }
 }
