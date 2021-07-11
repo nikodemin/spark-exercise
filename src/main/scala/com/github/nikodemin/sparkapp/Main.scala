@@ -15,6 +15,8 @@ object Main {
       .master("local")
       .getOrCreate()
 
+    import spark.implicits._
+
     spark.sparkContext.setLogLevel("ERROR")
 
     val schema = new StructType()
@@ -69,7 +71,7 @@ object Main {
       "unique_movies", "unique_posts", "unique_user_photos")
       .show
 
-    println("Grouping views by sessions and calculationg duration of each session")
+    println("Grouping views by sessions and calculating duration of each session")
     val betweenSessionMaxThreshold = 0.seconds
     val afkMinThreshold = 10.minutes
     val sessionAggregator = SessionAggregator(betweenSessionMaxThreshold, afkMinThreshold,
@@ -102,5 +104,14 @@ object Main {
       avg("session_duration"),
       expr("AVG(max_post_pos - min_post_pos)").as("viewing_depth")
     ).show
+
+    val userIdsDf = List.iterate(0, 50000)(_ + 1).toDF("userId")
+
+    println("Views grouped by users")
+    initialDf
+      .join(userIdsDf, "userId")
+      .groupBy("userId")
+      .agg(count("*").as("views"))
+      .show
   }
 }
