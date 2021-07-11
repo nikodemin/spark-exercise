@@ -68,28 +68,22 @@ object Main {
       .show
 
     println("Grouping views by sessions and calculationg duration of each session")
-    val sessionMaxThreshold = 20
+    val sessionMaxThreshold = 20000
     spark.udf.register("sessionAggregate", udaf(SessionAggregator(sessionMaxThreshold)))
 
     val sessionDf = initialDf.groupBy("userId")
       .agg(("timestamp", "sessionAggregate"))
       .select(col("userId"), explode(col("sessionaggregate(timestamp)")).as("session"))
-      //      .select(
-      //        col("userId"),
-      //        col("session").getItem(0).cast(StringType).as("session_duration_string"),
-      //        col("session").getItem(1).cast(LongType).as("session_duration")
-      //       encoder list)
-      .orderBy("userId")
+      .select(
+        col("userId"),
+        col("session._1").cast(StringType).as("session_duration_string"),
+        col("session._2").cast(LongType).as("session_duration")
+      )
+      .orderBy(col("session_duration").desc)
+      .cache
 
-    sessionDf.printSchema
     sessionDf.show(20, truncate = false)
 
-    initialDf.select(
-      from_unixtime(expr("timestamp/1000"), "yyyy-MM-dd hh:mm:ss").as("date"),
-      expr("durationMs/1000").as("duration_s")
-    )
-      .where(col("userId").equalTo(3869))
-      .sort("date")
-      .show(10000)
+    sessionDf.agg(avg("session_duration"))
   }
 }
