@@ -70,26 +70,37 @@ object Main {
       .show
 
     println("Grouping views by sessions and calculationg duration of each session")
-    val betweenSessionMaxThreshold = 20.seconds.toMillis
-    val afkMinThreshold = 10.minutes.toMillis
-    val sessionAggregator = SessionAggregator(betweenSessionMaxThreshold, "timestamp", "durationMs", afkMinThreshold)
+    val betweenSessionMaxThreshold = 0.seconds
+    val afkMinThreshold = 10.minutes
+    val sessionAggregator = SessionAggregator(betweenSessionMaxThreshold, afkMinThreshold,
+      "timestamp", "durationMs", "position")
 
     val sessionDf = initialDf.groupBy("userId")
       .agg(sessionAggregator.toColumn.as("session_agg"))
       .select(col("userId"), explode(col("session_agg")).as("session"))
       .select(
         col("userId"),
-        col("session._1").cast(StringType).as("session_duration_string"),
-        col("session._2").cast(LongType).as("session_duration")
+        col("session.sessionStartTime").cast(LongType).as("session_start_time"),
+        col("session.sessionEndTime").cast(LongType).as("session_end_time"),
+        col("session.minPostPosition").cast(LongType).as("min_post_pos"),
+        col("session.maxPostPosition").cast(LongType).as("max_post_pos")
       )
+      .withColumn("date_repr", concat(
+        from_unixtime(expr("session_start_time/1000"), "yyyy-MM-dd hh:mm:ss"),
+        lit(" - "),
+        from_unixtime(expr("session_end_time/1000"), "yyyy-MM-dd hh:mm:ss"),
+      ))
+      .withColumn("session_duration", expr("(session_end_time - session_start_time)/1000"))
       .orderBy(col("session_duration").desc)
       .cache
 
+    sessionDf.printSchema
     sessionDf.show(20, truncate = false)
 
     sessionDf.agg(
       count("session_duration").as("session_count"),
-      avg("session_duration")
+      avg("session_duration"),
+      expr("AVG(max_post_pos - min_post_pos)").as("viewing_depth")
     ).show
   }
 }
