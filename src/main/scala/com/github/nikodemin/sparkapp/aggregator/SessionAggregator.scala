@@ -4,16 +4,24 @@ import java.time.format.DateTimeFormatter
 import java.time.{Instant, LocalDateTime, ZoneId}
 
 import org.apache.spark.sql.expressions.Aggregator
-import org.apache.spark.sql.{Encoder, Encoders}
+import org.apache.spark.sql.{Encoder, Encoders, Row}
 
 import scala.annotation.tailrec
 
-case class SessionAggregator(sessionMaxThreshold: Long)
-  extends Aggregator[Long, List[(Long, Long)], List[(String, Long)]] {
+case class SessionAggregator(
+                              betweenSessionMaxThreshold: Long,
+                              timestampColumnName: String,
+                              durationColumnName: String,
+                              afkMinThreshold: Long = Long.MaxValue,
+                            )
+  extends Aggregator[Row, List[(Long, Long)], List[(String, Long)]] {
   override def zero: List[(Long, Long)] = List.empty
 
-  override def reduce(acc: List[(Long, Long)], timestamp: Long): List[(Long, Long)] =
-    mergeWithElement(acc, (timestamp, timestamp))
+  override def reduce(acc: List[(Long, Long)], row: Row): List[(Long, Long)] = {
+    val timestamp = row.getAs[Long](timestampColumnName)
+    val duration = Math.min(row.getAs[Long](durationColumnName), afkMinThreshold)
+    mergeWithElement(acc, (timestamp, timestamp + duration))
+  }
 
   override def merge(acc: List[(Long, Long)], acc2: List[(Long, Long)]): List[(Long, Long)] = mergeIntervals(acc, acc2)
 
@@ -36,8 +44,8 @@ case class SessionAggregator(sessionMaxThreshold: Long)
 
   private def mergeWithElement(list: List[(Long, Long)], element: (Long, Long)): List[(Long, Long)] = {
     val (mergeableElements, otherElements) = list.partition { case (start, end) =>
-      (element._1 - sessionMaxThreshold <= end && element._2 >= end) ||
-        (element._2 + sessionMaxThreshold >= start && element._1 <= start) ||
+      (element._1 - betweenSessionMaxThreshold <= end && element._2 >= end) ||
+        (element._2 + betweenSessionMaxThreshold >= start && element._1 <= start) ||
         (element._1 >= start && element._2 <= end)
     }
 

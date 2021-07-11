@@ -5,6 +5,8 @@ import org.apache.spark.sql.SparkSession
 import org.apache.spark.sql.functions._
 import org.apache.spark.sql.types._
 
+import scala.concurrent.duration._
+
 object Main {
 
   def main(args: Array[String]): Unit = {
@@ -68,12 +70,13 @@ object Main {
       .show
 
     println("Grouping views by sessions and calculationg duration of each session")
-    val sessionMaxThreshold = 20000
-    spark.udf.register("sessionAggregate", udaf(SessionAggregator(sessionMaxThreshold)))
+    val betweenSessionMaxThreshold = 20.seconds.toMillis
+    val afkMinThreshold = 10.minutes.toMillis
+    val sessionAggregator = SessionAggregator(betweenSessionMaxThreshold, "timestamp", "durationMs", afkMinThreshold)
 
     val sessionDf = initialDf.groupBy("userId")
-      .agg(("timestamp", "sessionAggregate"))
-      .select(col("userId"), explode(col("sessionaggregate(timestamp)")).as("session"))
+      .agg(sessionAggregator.toColumn.as("session_agg"))
+      .select(col("userId"), explode(col("session_agg")).as("session"))
       .select(
         col("userId"),
         col("session._1").cast(StringType).as("session_duration_string"),
@@ -84,6 +87,9 @@ object Main {
 
     sessionDf.show(20, truncate = false)
 
-    sessionDf.agg(avg("session_duration"))
+    sessionDf.agg(
+      count("session_duration").as("session_count"),
+      avg("session_duration")
+    ).show
   }
 }
